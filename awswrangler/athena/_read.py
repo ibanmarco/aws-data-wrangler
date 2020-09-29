@@ -7,9 +7,9 @@ import re
 import uuid
 from typing import Any, Dict, Iterator, List, Match, NamedTuple, Optional, Union
 
-import boto3  # type: ignore
-import botocore.exceptions  # type: ignore
-import pandas as pd  # type: ignore
+import boto3
+import botocore.exceptions
+import pandas as pd
 
 from awswrangler import _utils, catalog, exceptions, s3
 from awswrangler._config import apply_configs
@@ -328,6 +328,7 @@ def _resolve_query_with_cache(
 def _resolve_query_without_cache_ctas(
     sql: str,
     database: Optional[str],
+    data_source: Optional[str],
     s3_output: Optional[str],
     keep_files: bool,
     chunksize: Union[int, bool, None],
@@ -357,6 +358,7 @@ def _resolve_query_without_cache_ctas(
             sql=sql,
             wg_config=wg_config,
             database=database,
+            data_source=data_source,
             s3_output=s3_output,
             workgroup=workgroup,
             encryption=encryption,
@@ -365,6 +367,10 @@ def _resolve_query_without_cache_ctas(
         )
     except botocore.exceptions.ClientError as ex:
         error: Dict[str, Any] = ex.response["Error"]
+        if error["Code"] == "InvalidRequestException" and "Exception parsing query" in error["Message"]:
+            raise exceptions.InvalidCtasApproachQuery(
+                "Is not possible to wrap this query into a CTAS statement. Please use ctas_approach=False."
+            )
         if error["Code"] == "InvalidRequestException" and "extraneous input" in error["Message"]:
             raise exceptions.InvalidCtasApproachQuery(
                 "Is not possible to wrap this query into a CTAS statement. Please use ctas_approach=False."
@@ -404,6 +410,7 @@ def _resolve_query_without_cache_ctas(
 def _resolve_query_without_cache_regular(
     sql: str,
     database: Optional[str],
+    data_source: Optional[str],
     s3_output: Optional[str],
     keep_files: bool,
     chunksize: Union[int, bool, None],
@@ -420,6 +427,7 @@ def _resolve_query_without_cache_regular(
         sql=sql,
         wg_config=wg_config,
         database=database,
+        data_source=data_source,
         s3_output=s3_output,
         workgroup=workgroup,
         encryption=encryption,
@@ -443,6 +451,7 @@ def _resolve_query_without_cache(
     # pylint: disable=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
     sql: str,
     database: str,
+    data_source: Optional[str],
     ctas_approach: bool,
     categories: Optional[List[str]],
     chunksize: Union[int, bool, None],
@@ -472,6 +481,7 @@ def _resolve_query_without_cache(
             return _resolve_query_without_cache_ctas(
                 sql=sql,
                 database=database,
+                data_source=data_source,
                 s3_output=_s3_output,
                 keep_files=keep_files,
                 chunksize=chunksize,
@@ -489,6 +499,7 @@ def _resolve_query_without_cache(
     return _resolve_query_without_cache_regular(
         sql=sql,
         database=database,
+        data_source=data_source,
         s3_output=_s3_output,
         keep_files=keep_files,
         chunksize=chunksize,
@@ -519,6 +530,7 @@ def read_sql_query(
     boto3_session: Optional[boto3.Session] = None,
     max_cache_seconds: int = 0,
     max_cache_query_inspections: int = 50,
+    data_source: Optional[str] = None,
 ) -> Union[pd.DataFrame, Iterator[pd.DataFrame]]:
     """Execute any SQL query on AWS Athena and return the results as a Pandas DataFrame.
 
@@ -549,6 +561,7 @@ def read_sql_query(
     - Does not support columns with repeated names.
     - Does not support columns with undefined data types.
     - A temporary table will be created and then deleted immediately.
+    - Does not support custom data_source/catalog_id.
 
     **2** - ctas_approach=False:
 
@@ -559,6 +572,7 @@ def read_sql_query(
     - Faster for small result sizes (less latency).
     - Does not require create/delete table permissions on Glue
     - Supports timestamp with time zone.
+    - Support custom data_source/catalog_id.
 
     CONS:
 
@@ -573,7 +587,7 @@ def read_sql_query(
     `Boto3/Athena <https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services
     /athena.html#Athena.Client.get_query_execution>`_ .
 
-    For a pratical example check out the
+    For a practical example check out the
     `related tutorial <https://github.com/awslabs/aws-data-wrangler/blob/
     master/tutorials/024%20-%20Athena%20Query%20Metadata.ipynb>`_!
 
@@ -658,6 +672,8 @@ def read_sql_query(
         Max number of queries that will be inspected from the history to try to find some result to reuse.
         The bigger the number of inspection, the bigger will be the latency for not cached queries.
         Only takes effect if max_cache_seconds > 0.
+    data_source : str, optional
+        Data Source / Catalog name. If None, 'AwsDataCatalog' will be used by default.
 
     Returns
     -------
@@ -671,6 +687,14 @@ def read_sql_query(
     >>> scanned_bytes = df.query_metadata["Statistics"]["DataScannedInBytes"]
 
     """
+    if ctas_approach and data_source not in (None, "AwsDataCatalog"):
+        raise exceptions.InvalidArgumentCombination(
+            "Queries with ctas_approach=True (default) does not support "
+            "data_source values different than None and 'AwsDataCatalog'. "
+            "Please check the related tutorial for more details "
+            "(https://github.com/awslabs/aws-data-wrangler/blob/master/"
+            "tutorials/006%20-%20Amazon%20Athena.ipynb)"
+        )
     session: boto3.Session = _utils.ensure_session(session=boto3_session)
 
     cache_info: _CacheInfo = _check_for_cached_results(
@@ -697,6 +721,7 @@ def read_sql_query(
     return _resolve_query_without_cache(
         sql=sql,
         database=database,
+        data_source=data_source,
         ctas_approach=ctas_approach,
         categories=categories,
         chunksize=chunksize,
@@ -728,6 +753,7 @@ def read_sql_table(
     boto3_session: Optional[boto3.Session] = None,
     max_cache_seconds: int = 0,
     max_cache_query_inspections: int = 50,
+    data_source: Optional[str] = None,
 ) -> Union[pd.DataFrame, Iterator[pd.DataFrame]]:
     """Extract the full table AWS Athena and return the results as a Pandas DataFrame.
 
@@ -781,7 +807,7 @@ def read_sql_table(
     `Boto3/Athena <https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services
     /athena.html#Athena.Client.get_query_execution>`_ .
 
-    For a pratical example check out the
+    For a practical example check out the
     `related tutorial <https://github.com/awslabs/aws-data-wrangler/blob/master/
     tutorials/024%20-%20Athena%20Query%20Metadata.ipynb>`_!
 
@@ -864,6 +890,8 @@ def read_sql_table(
         Max number of queries that will be inspected from the history to try to find some result to reuse.
         The bigger the number of inspection, the bigger will be the latency for not cached queries.
         Only takes effect if max_cache_seconds > 0.
+    data_source : str, optional
+        Data Source / Catalog name. If None, 'AwsDataCatalog' will be used by default.
 
     Returns
     -------
@@ -881,6 +909,7 @@ def read_sql_table(
     return read_sql_query(
         sql=f'SELECT * FROM "{table}"',
         database=database,
+        data_source=data_source,
         ctas_approach=ctas_approach,
         categories=categories,
         chunksize=chunksize,

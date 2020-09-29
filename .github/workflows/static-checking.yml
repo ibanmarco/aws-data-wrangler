@@ -41,4 +41,6 @@ jobs:
       - name: Black style
         run: black --check --line-length 120 --target-version py36 awswrangler tests
       - name: Imports order check (isort)
-        run: isort -rc --check-only awswrangler tests
+        run: isort --check-only awswrangler tests
+      - name: Documentation check
+        run: doc8 --ignore D005,D002 --max-line-length 120 docs/source
