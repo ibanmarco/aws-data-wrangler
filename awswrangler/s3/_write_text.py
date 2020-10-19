@@ -37,7 +37,6 @@ def _to_text(
     else:
         raise RuntimeError("path and path_root received at the same time.")
     encoding: Optional[str] = pandas_kwargs.get("encoding", None)
-    newline: Optional[str] = pandas_kwargs.get("line_terminator", None)
     with open_s3_object(
         path=file_path,
         mode="w",
@@ -45,7 +44,7 @@ def _to_text(
         s3_additional_kwargs=s3_additional_kwargs,
         boto3_session=boto3_session,
         encoding=encoding,
-        newline=newline,
+        newline=None,
     ) as f:
         _logger.debug("pandas_kwargs: %s", pandas_kwargs)
         if file_format == "csv":
@@ -157,7 +156,7 @@ def to_csv(  # pylint: disable=too-many-arguments,too-many-locals
     mode : str, optional
         ``append`` (Default), ``overwrite``, ``overwrite_partitions``. Only takes effect if dataset=True.
         For details check the related tutorial:
-        https://aws-data-wrangler.readthedocs.io/en/latest/stubs/awswrangler.s3.to_parquet.html#awswrangler.s3.to_parquet
+        https://aws-data-wrangler.readthedocs.io/en/stable/stubs/awswrangler.s3.to_parquet.html#awswrangler.s3.to_parquet
     catalog_versioning : bool
         If True and `mode="overwrite"`, creates an archived version of the table catalog before updating it.
     database : str, optional

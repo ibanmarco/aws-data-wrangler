@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - master
-      - dev
   pull_request:
     branches:
       - master
-      - dev
 
 jobs:
   build:
@@ -25,7 +23,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Setup Environment
-        run: ./requirements.sh
+        run: ./setup.sh
       - name: CloudFormation Lint - Base
         run: cfn-lint -t cloudformation/base.yaml
       - name: CloudFormation Lint - Databases
